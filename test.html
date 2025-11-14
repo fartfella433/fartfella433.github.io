@@ -1,34 +1,71 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Basic Snake HTML Game</title>
+<title>Snake Game with Score & Competitive Mode</title>
 <meta charset="UTF-8">
 <style>
 html, body {
-height: 100%;
-margin: 0;
+  height: 100%;
+  margin: 0;
+  background: black;
+  color: white;
+  font-family: Arial, sans-serif;
 }
 body {
-background: black;
-display: flex;
-align-items: center;
-justify-content: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+}
+#ui {
+  text-align: center;
+}
+#toggle {
+  padding: 12px 24px;
+  background: #4a90e2;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: bold;
+}
+#toggle:hover {
+  background: #357abd;
+}
+#status {
+  font-size: 32px;
+  color: lime;
+  font-weight: bold;
+  margin: 10px 0;
+  min-height: 40px;
 }
 canvas {
-border: 1px solid white;
+  border: 2px solid white;
+  background: black;
+  display: block;
 }
 </style>
 </head>
 <body>
-<canvas width="400" height="400" id="game"></canvas>
+<div id="ui">
+  <button id="toggle">Competitive Mode</button>
+  <div id="status"></div>
+</div>
+<canvas width="400" height="400" id="game" tabindex="0"></canvas>
 <script>
-var canvas = document.getElementById('game');
-var context = canvas.getContext('2d');
+const canvas = document.getElementById('game');
+const context = canvas.getContext('2d');
+const toggleBtn = document.getElementById('toggle');
+const statusEl = document.getElementById('status');
 
-var grid = 16;
-var count = 0;
+const grid = 16;
+let count = 0;
+let competitive = false;
+let paused = false;
 
-var snake = {
+const playerSnake = {
   x: 160,
   y: 160,
   dx: grid,
@@ -36,7 +73,15 @@ var snake = {
   cells: [],
   maxCells: 4
 };
-var apple = {
+const botSnake = {
+  x: 240,
+  y: 240,
+  dx: 0,
+  dy: grid,
+  cells: [],
+  maxCells: 4
+};
+const apple = {
   x: 320,
   y: 320
 };
@@ -45,110 +90,250 @@ function getRandomInt(min, max) {
   return Math.floor(Math.random() * (max - min)) + min;
 }
 
+function toroidalDist(a, b, size) {
+  const d = Math.abs(a - b);
+  return Math.min(d, size - d);
+}
+
+function randomApple() {
+  let tries = 0;
+  while (tries < 100) {
+    apple.x = getRandomInt(0, 25) * grid;
+    apple.y = getRandomInt(0, 25) * grid;
+    let overlap = playerSnake.cells.some(c => c.x === apple.x && c.y === apple.y);
+    if (competitive && botSnake.cells.length > 0) {
+      overlap = overlap || botSnake.cells.some(c => c.x === apple.x && c.y === apple.y);
+    }
+    if (!overlap) return;
+    tries++;
+  }
+  // Rare fallback
+}
+
+function getBestDir(snake) {
+  const dirs = [
+    { dx: -grid, dy: 0 },
+    { dx: 0, dy: -grid },
+    { dx: grid, dy: 0 },
+    { dx: 0, dy: grid }
+  ];
+  let bestDir = null;
+  let minDist = Infinity;
+  const opposite = { dx: -snake.dx, dy: -snake.dy };
+  for (let dir of dirs) {
+    if (dir.dx === opposite.dx && dir.dy === opposite.dy) continue;
+    let nx = snake.x + dir.dx;
+    let ny = snake.y + dir.dy;
+    if (nx < 0) nx = canvas.width - grid;
+    else if (nx >= canvas.width) nx = 0;
+    if (ny < 0) ny = canvas.height - grid;
+    else if (ny >= canvas.height) ny = 0;
+    let hitSelf = snake.cells.some(c => c.x === nx && c.y === ny);
+    if (hitSelf) continue;
+    const distX = toroidalDist(nx, apple.x, canvas.width);
+    const distY = toroidalDist(ny, apple.y, canvas.height);
+    const dist = distX + distY;
+    if (dist < minDist || (dist === minDist && Math.random() < 0.1)) {
+      minDist = dist;
+      bestDir = dir;
+    }
+  }
+  if (bestDir) {
+    snake.dx = bestDir.dx;
+    snake.dy = bestDir.dy;
+  }
+}
+
+function resetGame() {
+  playerSnake.x = 160;
+  playerSnake.y = 160;
+  playerSnake.dx = grid;
+  playerSnake.dy = 0;
+  playerSnake.cells = [
+    { x: 160, y: 160 },
+    { x: 144, y: 160 },
+    { x: 128, y: 160 },
+    { x: 112, y: 160 }
+  ];
+  playerSnake.maxCells = 4;
+  if (competitive) {
+    botSnake.x = 240;
+    botSnake.y = 240;
+    botSnake.dx = 0;
+    botSnake.dy = grid;
+    botSnake.cells = [
+      { x: 240, y: 240 },
+      { x: 240, y: 224 },
+      { x: 240, y: 208 },
+      { x: 240, y: 192 }
+    ];
+    botSnake.maxCells = 4;
+  } else {
+    botSnake.cells = [];
+    botSnake.maxCells = 4;
+  }
+  randomApple();
+  paused = false;
+  statusEl.textContent = '';
+}
+
+function hasSelfCollision(snake) {
+  for (let i = 0; i < snake.cells.length; i++) {
+    for (let j = i + 1; j < snake.cells.length; j++) {
+      if (snake.cells[i].x === snake.cells[j].x && snake.cells[i].y === snake.cells[j].y) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 function loop() {
   requestAnimationFrame(loop);
+  if (paused) return;
 
-  if (++count < 4) {
+  if (++count < 8) return;
+  count = 0;
+  context.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Player move
+  playerSnake.x += playerSnake.dx;
+  playerSnake.y += playerSnake.dy;
+  if (playerSnake.x < 0) playerSnake.x = canvas.width - grid;
+  else if (playerSnake.x >= canvas.width) playerSnake.x = 0;
+  if (playerSnake.y < 0) playerSnake.y = canvas.height - grid;
+  else if (playerSnake.y >= canvas.height) playerSnake.y = 0;
+  playerSnake.cells.unshift({ x: playerSnake.x, y: playerSnake.y });
+  if (playerSnake.cells.length > playerSnake.maxCells) {
+    playerSnake.cells.pop();
+  }
+
+  // Draw apple
+  context.fillStyle = 'red';
+  context.fillRect(apple.x, apple.y, grid - 1, grid - 1);
+
+  // Player eat
+  if (playerSnake.cells[0].x === apple.x && playerSnake.cells[0].y === apple.y) {
+    playerSnake.maxCells++;
+    randomApple();
+  }
+
+  // Draw player
+  context.fillStyle = 'green';
+  playerSnake.cells.forEach(cell => {
+    context.fillRect(cell.x, cell.y, grid - 1, grid - 1);
+  });
+
+  let playerCollision = hasSelfCollision(playerSnake);
+
+  // Bot if competitive
+  let botCollision = false;
+  let pvsCollision = false;
+  if (competitive) {
+    getBestDir(botSnake);
+    botSnake.x += botSnake.dx;
+    botSnake.y += botSnake.dy;
+    if (botSnake.x < 0) botSnake.x = canvas.width - grid;
+    else if (botSnake.x >= canvas.width) botSnake.x = 0;
+    if (botSnake.y < 0) botSnake.y = canvas.height - grid;
+    else if (botSnake.y >= canvas.height) botSnake.y = 0;
+    botSnake.cells.unshift({ x: botSnake.x, y: botSnake.y });
+    if (botSnake.cells.length > botSnake.maxCells) {
+      botSnake.cells.pop();
+    }
+
+    // Bot eat
+    if (botSnake.cells[0].x === apple.x && botSnake.cells[0].y === apple.y) {
+      botSnake.maxCells++;
+      randomApple();
+    }
+
+    // Draw bot
+    context.fillStyle = 'blue';
+    botSnake.cells.forEach(cell => {
+      context.fillRect(cell.x, cell.y, grid - 1, grid - 1);
+    });
+
+    botCollision = hasSelfCollision(botSnake);
+    // P vs Bot collision
+    for (let pc of playerSnake.cells) {
+      for (let bc of botSnake.cells) {
+        if (pc.x === bc.x && pc.y === bc.y) {
+          pvsCollision = true;
+          break;
+        }
+      }
+      if (pvsCollision) break;
+    }
+  }
+
+  // Game over checks
+  const gameOver = playerCollision || (competitive && (botCollision || pvsCollision));
+  if (gameOver) {
+    statusEl.textContent = 'Collision!';
+    paused = true;
+    setTimeout(() => {
+      resetGame();
+    }, 3000);
     return;
   }
 
-  count = 0;
-  context.clearRect(0,0,canvas.width,canvas.height);
-
-  snake.x += snake.dx;
-  snake.y += snake.dy;
-
-  if (snake.x < 0) {
-    snake.x = canvas.width - grid;
+  // Win checks
+  if (playerSnake.maxCells - 4 >= 15) {
+    statusEl.textContent = 'Player Wins!';
+    paused = true;
+    setTimeout(() => {
+      resetGame();
+    }, 3000);
+    return;
   }
-  else if (snake.x >= canvas.width) {
-    snake.x = 0;
-  }
-
-  if (snake.y < 0) {
-    snake.y = canvas.height - grid;
-  }
-  else if (snake.y >= canvas.height) {
-    snake.y = 0;
+  if (competitive && botSnake.maxCells - 4 >= 15) {
+    statusEl.textContent = 'Bot Wins!';
+    paused = true;
+    setTimeout(() => {
+      resetGame();
+    }, 3000);
+    return;
   }
 
-  snake.cells.unshift({x: snake.x, y: snake.y});
-
-  if (snake.cells.length > snake.maxCells) {
-    snake.cells.pop();
+  // Draw scores
+  context.fillStyle = 'white';
+  context.font = 'bold 24px Arial';
+  context.textAlign = 'left';
+  context.fillText(`Score: ${playerSnake.maxCells - 4}`, 20, 35);
+  if (competitive) {
+    context.textAlign = 'right';
+    context.fillText(`Bot: ${botSnake.maxCells - 4}`, canvas.width - 20, 35);
   }
-
-  context.fillStyle = 'red';
-  context.fillRect(apple.x, apple.y, grid-1, grid-1);
-
-  context.fillStyle = 'green';
-  snake.cells.forEach(function(cell, index) {
-    context.fillRect(cell.x, cell.y, grid-1, grid-1);
-
-    if (cell.x === apple.x && cell.y === apple.y) {
-      snake.maxCells++;
-      apple.x = getRandomInt(0, 25) * grid;
-      apple.y = getRandomInt(0, 25) * grid;
-    }
-
-    for (var i = index + 1; i < snake.cells.length; i++) {
-      if (cell.x === snake.cells[i].x && cell.y === snake.cells[i].y) {
-        snake.x = 160;
-        snake.y = 160;
-        snake.cells = [];
-        snake.maxCells = 4;
-        snake.dx = grid;
-        snake.dy = 0;
-        apple.x = getRandomInt(0, 25) * grid;
-        apple.y = getRandomInt(0, 25) * grid;
-      }
-    }
-  });
+  context.textAlign = 'left';
 }
 
 document.addEventListener('keydown', function(e) {
-  if (e.which === 37 && snake.dx === 0) {
-    snake.dx = -grid;
-    snake.dy = 0;
-  }
-  else if (e.which === 38 && snake.dy === 0) {
-    snake.dy = -grid;
-    snake.dx = 0;
-  }
-  else if (e.which === 39 && snake.dx === 0) {
-    snake.dx = grid;
-    snake.dy = 0;
-  }
-  else if (e.which === 40 && snake.dy === 0) {
-    snake.dy = grid;
-    snake.dx = 0;
+  if (e.which === 37 && playerSnake.dx === 0) {
+    playerSnake.dx = -grid;
+    playerSnake.dy = 0;
+  } else if (e.which === 38 && playerSnake.dy === 0) {
+    playerSnake.dy = -grid;
+    playerSnake.dx = 0;
+  } else if (e.which === 39 && playerSnake.dx === 0) {
+    playerSnake.dx = grid;
+    playerSnake.dy = 0;
+  } else if (e.which === 40 && playerSnake.dy === 0) {
+    playerSnake.dy = grid;
+    playerSnake.dx = 0;
   }
 });
 
+toggleBtn.addEventListener('click', () => {
+  competitive = !competitive;
+  toggleBtn.textContent = competitive ? 'Single Player' : 'Competitive Mode';
+  resetGame();
+});
+
+canvas.focus();
+resetGame();
 requestAnimationFrame(loop);
 </script>
 </body>
 </html>
-```<grok-card data-id="36f991" data-type="citation_card"></grok-card>
 
-**Bonus: Memory Match Game Code** (as requested earlier)  
-**How to Play**: Click cards to flip them. Find matching pairs (same image). Matches stay flipped; mismatches flip back after 0.5s. Track moves—win in as few as possible! Restart anytime. 12 cards (6 pairs).<grok-card data-id="12fc71" data-type="citation_card"></grok-card>  
-
-Save as another `index.html` (e.g., `memory.html`) or separate repo. Works perfectly on GitHub Pages.
-
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Memory Card Game</title>
-    <!-- Full CSS and JS embedded from GeeksforGeeks, truncated for brevity; paste the complete from tool result  -->
-</head>
-<body>
-    <!-- Full HTML structure from  -->
-    <script>
-        <!-- Full JS from  -->
-    </script>
-</body>
-</html>
