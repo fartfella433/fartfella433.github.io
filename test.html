@@ -1,339 +1,300 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Snake Game with Score & Competitive Mode</title>
+<title>Enhanced Snake Game — Powerups, Difficulties, Coins, Skins</title>
 <meta charset="UTF-8">
 <style>
 html, body {
-  height: 100%;
-  margin: 0;
-  background: black;
-  color: white;
-  font-family: Arial, sans-serif;
+  height: 100%; margin: 0; background: black; color: white;
+  font-family: Arial, sans-serif; overflow: hidden;
 }
-body {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+#container {
+  display: flex; height: 100%; width: 100%;
+}
+#sidebar {
+  width: 260px; background: #111; border-right: 2px solid #444;
+  padding: 20px; overflow-y: auto;
+}
+#gameArea {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
   justify-content: center;
-  gap: 20px;
 }
-#ui {
-  text-align: center;
+button {
+  padding: 10px 16px; background: #4a90e2; border: none; color: white;
+  border-radius: 6px; cursor: pointer; font-size: 15px; width: 100%;
 }
-#toggle {
-  padding: 12px 24px;
-  background: #4a90e2;
-  color: white;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 18px;
-  font-weight: bold;
-}
-#toggle:hover {
-  background: #357abd;
-}
-#status {
-  font-size: 32px;
-  color: lime;
-  font-weight: bold;
-  margin: 10px 0;
-  min-height: 40px;
-}
+button:hover { background: #357abd; }
 canvas {
   border: 2px solid white;
-  background: black;
-  display: block;
+}
+.skin-button {
+  margin-top: 6px; padding: 8px; background: #222;
+  border: 1px solid #555;
 }
 </style>
 </head>
 <body>
-<div id="ui">
-  <button id="toggle">Competitive Mode</button>
-  <div id="status"></div>
+<div id="container">
+<div id="sidebar">
+  <h2>Snake Menu</h2>
+  <h3>Difficulty</h3>
+  <button onclick="setDifficulty('easy')">Easy</button>
+  <button onclick="setDifficulty('normal')">Normal</button>
+  <button onclick="setDifficulty('hard')">Hard</button>
+  <button onclick="setDifficulty('insane')">Insane</button>
+
+  <h3 style="margin-top:20px;">Mode</h3>
+  <button onclick="toggleMode()" id="modeBtn">Competitive: OFF</button>
+
+  <h3 style="margin-top:20px;">Coins: <span id="coins">0</span></h3>
+
+  <h3>Skins</h3>
+  <div id="shop"></div>
 </div>
-<canvas width="400" height="400" id="game" tabindex="0"></canvas>
+
+<div id="gameArea">
+  <div id="status" style="font-size:28px; height:40px; margin-bottom:10px;"></div>
+  <canvas id="game" width="400" height="400" tabindex="0"></canvas>
+</div>
+</div>
+
 <script>
 const canvas = document.getElementById('game');
-const context = canvas.getContext('2d');
-const toggleBtn = document.getElementById('toggle');
+const ctx = canvas.getContext('2d');
 const statusEl = document.getElementById('status');
+const coinsEl = document.getElementById('coins');
+const shopEl = document.getElementById('shop');
+const modeBtn = document.getElementById('modeBtn');
 
-const grid = 16;
+let grid = 16;
 let count = 0;
 let competitive = false;
 let paused = false;
+let difficulty = 'normal';
+let speedFrames = 8;
+let coins = 0;
+let currentSkin = 'green';
 
-const playerSnake = {
-  x: 160,
-  y: 160,
-  dx: grid,
-  dy: 0,
-  cells: [],
-  maxCells: 4
-};
-const botSnake = {
-  x: 240,
-  y: 240,
-  dx: 0,
-  dy: grid,
-  cells: [],
-  maxCells: 4
-};
-const apple = {
-  x: 320,
-  y: 320
+const skins = {
+  green: { name: 'Green', color: 'lime', cost: 0 },
+  blue: { name: 'Blue', color: 'cyan', cost: 20 },
+  red: { name: 'Red', color: 'red', cost: 20 },
+  rainbow: { name: 'Rainbow', color: 'rainbow', cost: 50 },
+  neon: { name: 'Neon', color: '#39ff14', cost: 75 }
 };
 
-function getRandomInt(min, max) {
-  return Math.floor(Math.random() * (max - min)) + min;
+function updateShop() {
+  shopEl.innerHTML = '';
+  for (let id in skins) {
+    const s = skins[id];
+    const btn = document.createElement('button');
+    btn.className = 'skin-button';
+    btn.textContent = `${s.name} (${s.cost})`;
+    btn.onclick = () => buySkin(id);
+    shopEl.appendChild(btn);
+  }
+}
+updateShop();
+
+function buySkin(id) {
+  const s = skins[id];
+  if (coins >= s.cost) {
+    coins -= s.cost;
+    coinsEl.textContent = coins;
+    currentSkin = id;
+  }
 }
 
-function toroidalDist(a, b, size) {
-  const d = Math.abs(a - b);
-  return Math.min(d, size - d);
+const player = { x:160, y:160, dx:grid, dy:0, cells:[], maxCells:4 };
+const bot = { x:240, y:240, dx:0, dy:grid, cells:[], maxCells:4 };
+const apple = { x:320, y:320 };
+
+const powerups = [];
+const powerTypes = ['speed','slow','ghost','double','freeze'];
+let ghostTimer = 0;
+let speedTimer = 0;
+let slowTimer = 0;
+let doubleTimer = 0;
+let freezeTimer = 0;
+
+function spawnPowerup() {
+  if (Math.random() < 0.01) {
+    powerups.push({
+      type: powerTypes[Math.floor(Math.random()*powerTypes.length)],
+      x: Math.floor(Math.random()*25)*grid,
+      y: Math.floor(Math.random()*25)*grid
+    });
+  }
 }
 
-function randomApple() {
-  let tries = 0;
-  while (tries < 100) {
-    apple.x = getRandomInt(0, 25) * grid;
-    apple.y = getRandomInt(0, 25) * grid;
-    let overlap = playerSnake.cells.some(c => c.x === apple.x && c.y === apple.y);
-    if (competitive && botSnake.cells.length > 0) {
-      overlap = overlap || botSnake.cells.some(c => c.x === apple.x && c.y === apple.y);
-    }
-    if (!overlap) return;
-    tries++;
-  }
-  // Rare fallback
+function applyPower(type) {
+  if (type === 'ghost') ghostTimer = 200;
+  if (type === 'speed') speedTimer = 150;
+  if (type === 'slow') slowTimer = 150;
+  if (type === 'double') doubleTimer = 200;
+  if (type === 'freeze') freezeTimer = 120;
 }
 
-function getBestDir(snake) {
-  const dirs = [
-    { dx: -grid, dy: 0 },
-    { dx: 0, dy: -grid },
-    { dx: grid, dy: 0 },
-    { dx: 0, dy: grid }
-  ];
-  let bestDir = null;
-  let minDist = Infinity;
-  const opposite = { dx: -snake.dx, dy: -snake.dy };
-  for (let dir of dirs) {
-    if (dir.dx === opposite.dx && dir.dy === opposite.dy) continue;
-    let nx = snake.x + dir.dx;
-    let ny = snake.y + dir.dy;
-    if (nx < 0) nx = canvas.width - grid;
-    else if (nx >= canvas.width) nx = 0;
-    if (ny < 0) ny = canvas.height - grid;
-    else if (ny >= canvas.height) ny = 0;
-    let hitSelf = snake.cells.some(c => c.x === nx && c.y === ny);
-    if (hitSelf) continue;
-    const distX = toroidalDist(nx, apple.x, canvas.width);
-    const distY = toroidalDist(ny, apple.y, canvas.height);
-    const dist = distX + distY;
-    if (dist < minDist || (dist === minDist && Math.random() < 0.1)) {
-      minDist = dist;
-      bestDir = dir;
-    }
-  }
-  if (bestDir) {
-    snake.dx = bestDir.dx;
-    snake.dy = bestDir.dy;
-  }
+function setDifficulty(d) {
+  difficulty = d;
+  if (d==='easy') speedFrames = 12;
+  if (d==='normal') speedFrames = 8;
+  if (d==='hard') speedFrames = 5;
+  if (d==='insane') speedFrames = 3;
+  resetGame();
+}
+
+function toggleMode() {
+  competitive = !competitive;
+  modeBtn.textContent = `Competitive: ${competitive? 'ON':'OFF'}`;
+  resetGame();
 }
 
 function resetGame() {
-  playerSnake.x = 160;
-  playerSnake.y = 160;
-  playerSnake.dx = grid;
-  playerSnake.dy = 0;
-  playerSnake.cells = [
-    { x: 160, y: 160 },
-    { x: 144, y: 160 },
-    { x: 128, y: 160 },
-    { x: 112, y: 160 }
-  ];
-  playerSnake.maxCells = 4;
-  if (competitive) {
-    botSnake.x = 240;
-    botSnake.y = 240;
-    botSnake.dx = 0;
-    botSnake.dy = grid;
-    botSnake.cells = [
-      { x: 240, y: 240 },
-      { x: 240, y: 224 },
-      { x: 240, y: 208 },
-      { x: 240, y: 192 }
-    ];
-    botSnake.maxCells = 4;
-  } else {
-    botSnake.cells = [];
-    botSnake.maxCells = 4;
-  }
-  randomApple();
-  paused = false;
-  statusEl.textContent = '';
-}
+  player.x=160; player.y=160; player.dx=grid; player.dy=0;
+  player.cells=[]; player.maxCells=4;
 
-function hasSelfCollision(snake) {
-  for (let i = 0; i < snake.cells.length; i++) {
-    for (let j = i + 1; j < snake.cells.length; j++) {
-      if (snake.cells[i].x === snake.cells[j].x && snake.cells[i].y === snake.cells[j].y) {
-        return true;
-      }
-    }
+  if (competitive) {
+    bot.x=240; bot.y=240; bot.dx=0; bot.dy=grid;
+    bot.cells=[]; bot.maxCells=4;
+  } else {
+    bot.cells=[];
   }
-  return false;
+
+  ghostTimer=speedTimer=slowTimer=doubleTimer=freezeTimer=0;
+  powerups.length = 0;
+
+  apple.x = Math.floor(Math.random()*25)*grid;
+  apple.y = Math.floor(Math.random()*25)*grid;
+  paused=false; statusEl.textContent='';
 }
 
 function loop() {
   requestAnimationFrame(loop);
   if (paused) return;
 
-  if (++count < 8) return;
-  count = 0;
-  context.clearRect(0, 0, canvas.width, canvas.height);
+  let frameSkip = speedFrames;
+  if (speedTimer>0) frameSkip = 3;
+  if (slowTimer>0) frameSkip = 12;
 
-  // Player move
-  playerSnake.x += playerSnake.dx;
-  playerSnake.y += playerSnake.dy;
-  if (playerSnake.x < 0) playerSnake.x = canvas.width - grid;
-  else if (playerSnake.x >= canvas.width) playerSnake.x = 0;
-  if (playerSnake.y < 0) playerSnake.y = canvas.height - grid;
-  else if (playerSnake.y >= canvas.height) playerSnake.y = 0;
-  playerSnake.cells.unshift({ x: playerSnake.x, y: playerSnake.y });
-  if (playerSnake.cells.length > playerSnake.maxCells) {
-    playerSnake.cells.pop();
+  if (++count < frameSkip) return;
+  count=0;
+
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  if (speedTimer>0) speedTimer--;
+  if (slowTimer>0) slowTimer--;
+  if (ghostTimer>0) ghostTimer--;
+  if (doubleTimer>0) doubleTimer--;
+  if (freezeTimer>0) freezeTimer--;
+
+  player.x += player.dx;
+  player.y += player.dy;
+  wrap(player);
+  player.cells.unshift({x:player.x, y:player.y});
+  if (player.cells.length > player.maxCells) player.cells.pop();
+
+  ctx.fillStyle='red';
+  ctx.fillRect(apple.x, apple.y, grid-1, grid-1);
+
+  if (player.x===apple.x && player.y===apple.y) {
+    let gain = doubleTimer>0 ? 2 : 1;
+    player.maxCells += gain;
+    coins += gain;
+    coinsEl.textContent = coins;
+    apple.x = Math.floor(Math.random()*25)*grid;
+    apple.y = Math.floor(Math.random()*25)*grid;
   }
 
-  // Draw apple
-  context.fillStyle = 'red';
-  context.fillRect(apple.x, apple.y, grid - 1, grid - 1);
-
-  // Player eat
-  if (playerSnake.cells[0].x === apple.x && playerSnake.cells[0].y === apple.y) {
-    playerSnake.maxCells++;
-    randomApple();
+  if (currentSkin==='rainbow') {
+    player.cells.forEach((c,i)=>{
+      ctx.fillStyle = `hsl(${(i*20)%360},100%,50%)`;
+      ctx.fillRect(c.x,c.y,grid-1,grid-1);
+    });
+  } else {
+    ctx.fillStyle = skins[currentSkin].color;
+    player.cells.forEach(c=>ctx.fillRect(c.x,c.y,grid-1,grid-1));
   }
 
-  // Draw player
-  context.fillStyle = 'green';
-  playerSnake.cells.forEach(cell => {
-    context.fillRect(cell.x, cell.y, grid - 1, grid - 1);
+  let collision = !ghostTimer && selfCollision(player);
+
+  if (competitive) {
+    if (!freezeTimer) moveBot();
+    bot.cells.unshift({x:bot.x,y:bot.y});
+    if (bot.cells.length > bot.maxCells) bot.cells.pop();
+
+    if (bot.x===apple.x && bot.y===apple.y) {
+      bot.maxCells++;
+      apple.x = Math.floor(Math.random()*25)*grid;
+      apple.y = Math.floor(Math.random()*25)*grid;
+    }
+
+    ctx.fillStyle='blue';
+    bot.cells.forEach(c=>ctx.fillRect(c.x,c.y,grid-1,grid-1));
+
+    if (selfCollision(bot)) collision=true;
+    if (touching(player,bot)) collision=true;
+  }
+
+  spawnPowerup();
+  powerups.forEach((p,i)=>{
+    ctx.fillStyle = 'yellow';
+    ctx.fillRect(p.x,p.y,grid-1,grid-1);
+    if (player.x===p.x && player.y===p.y) {
+      applyPower(p.type);
+      powerups.splice(i,1);
+    }
   });
 
-  let playerCollision = hasSelfCollision(playerSnake);
-
-  // Bot if competitive
-  let botCollision = false;
-  let pvsCollision = false;
-  if (competitive) {
-    getBestDir(botSnake);
-    botSnake.x += botSnake.dx;
-    botSnake.y += botSnake.dy;
-    if (botSnake.x < 0) botSnake.x = canvas.width - grid;
-    else if (botSnake.x >= canvas.width) botSnake.x = 0;
-    if (botSnake.y < 0) botSnake.y = canvas.height - grid;
-    else if (botSnake.y >= canvas.height) botSnake.y = 0;
-    botSnake.cells.unshift({ x: botSnake.x, y: botSnake.y });
-    if (botSnake.cells.length > botSnake.maxCells) {
-      botSnake.cells.pop();
-    }
-
-    // Bot eat
-    if (botSnake.cells[0].x === apple.x && botSnake.cells[0].y === apple.y) {
-      botSnake.maxCells++;
-      randomApple();
-    }
-
-    // Draw bot
-    context.fillStyle = 'blue';
-    botSnake.cells.forEach(cell => {
-      context.fillRect(cell.x, cell.y, grid - 1, grid - 1);
-    });
-
-    botCollision = hasSelfCollision(botSnake);
-    // P vs Bot collision
-    for (let pc of playerSnake.cells) {
-      for (let bc of botSnake.cells) {
-        if (pc.x === bc.x && pc.y === bc.y) {
-          pvsCollision = true;
-          break;
-        }
-      }
-      if (pvsCollision) break;
-    }
+  if (collision) {
+    statusEl.textContent='Collision!';
+    paused=true;
+    setTimeout(resetGame,2000);
   }
 
-  // Game over checks
-  const gameOver = playerCollision || (competitive && (botCollision || pvsCollision));
-  if (gameOver) {
-    statusEl.textContent = 'Collision!';
-    paused = true;
-    setTimeout(() => {
-      resetGame();
-    }, 3000);
-    return;
-  }
-
-  // Win checks
-  if (playerSnake.maxCells - 4 >= 15) {
-    statusEl.textContent = 'Player Wins!';
-    paused = true;
-    setTimeout(() => {
-      resetGame();
-    }, 3000);
-    return;
-  }
-  if (competitive && botSnake.maxCells - 4 >= 15) {
-    statusEl.textContent = 'Bot Wins!';
-    paused = true;
-    setTimeout(() => {
-      resetGame();
-    }, 3000);
-    return;
-  }
-
-  // Draw scores
-  context.fillStyle = 'white';
-  context.font = 'bold 24px Arial';
-  context.textAlign = 'left';
-  context.fillText(`Score: ${playerSnake.maxCells - 4}`, 20, 35);
-  if (competitive) {
-    context.textAlign = 'right';
-    context.fillText(`Bot: ${botSnake.maxCells - 4}`, canvas.width - 20, 35);
-  }
-  context.textAlign = 'left';
+  ctx.fillStyle='white';
+  ctx.font='bold 20px Arial';
+  ctx.fillText(`Score: ${player.maxCells-4}`,10,25);
+  if (competitive) ctx.fillText(`Bot: ${bot.maxCells-4}`,300,25);
 }
 
-document.addEventListener('keydown', function(e) {
-  if (e.which === 37 && playerSnake.dx === 0) {
-    playerSnake.dx = -grid;
-    playerSnake.dy = 0;
-  } else if (e.which === 38 && playerSnake.dy === 0) {
-    playerSnake.dy = -grid;
-    playerSnake.dx = 0;
-  } else if (e.which === 39 && playerSnake.dx === 0) {
-    playerSnake.dx = grid;
-    playerSnake.dy = 0;
-  } else if (e.which === 40 && playerSnake.dy === 0) {
-    playerSnake.dy = grid;
-    playerSnake.dx = 0;
-  }
+function moveBot() {
+  let dirs=[
+    {dx:grid,dy:0},{dx:-grid,dy:0},{dx:0,dy:grid},{dx:0,dy:-grid}
+  ];
+  dirs.sort(()=>Math.random()-0.5);
+  let best=null; let bestDist=9999;
+  dirs.forEach(d=>{
+    let nx=bot.x+d.dx, ny=bot.y+d.dy;
+    wrapPos({x:nx,y:ny});
+    let dist = Math.abs(nx-apple.x)+Math.abs(ny-apple.y);
+    if (dist<bestDist) { bestDist=dist; best=d; }
+  });
+  if (best) { bot.dx=best.dx; bot.dy=best.dy; bot.x+=bot.dx; bot.y+=bot.dy; wrap(bot);}  
+}
+
+function wrap(s){ if(s.x<0)s.x=384; if(s.x>384)s.x=0; if(s.y<0)s.y=384; if(s.y>384)s.y=0; }
+function wrapPos(s){ if(s.x<0)s.x=384; if(s.x>384)s.x=0; if(s.y<0)s.y=384; if(s.y>384)s.y=0; }
+
+function selfCollision(s){
+  for(let i=1;i<s.cells.length;i++) if(s.cells[0].x===s.cells[i].x && s.cells[0].y===s.cells[i].y) return true;
+  return false;
+}
+
+function touching(a,b){
+  for(let c1 of a.cells) for(let c2 of b.cells) if(c1.x===c2.x&&c1.y===c2.y) return true;
+  return false;
+}
+
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowLeft'&&player.dx===0){player.dx=-grid;player.dy=0;}
+  if(e.key==='ArrowRight'&&player.dx===0){player.dx=grid;player.dy=0;}
+  if(e.key==='ArrowUp'&&player.dy===0){player.dy=-grid;player.dx=0;}
+  if(e.key==='ArrowDown'&&player.dy===0){player.dy=grid;player.dx=0;}
 });
 
-toggleBtn.addEventListener('click', () => {
-  competitive = !competitive;
-  toggleBtn.textContent = competitive ? 'Single Player' : 'Competitive Mode';
-  resetGame();
-});
-
-canvas.focus();
 resetGame();
 requestAnimationFrame(loop);
 </script>
 </body>
 </html>
-
