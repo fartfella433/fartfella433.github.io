@@ -1,300 +1,340 @@
 <!DOCTYPE html>
 <html>
 <head>
-<title>Enhanced Snake Game — Powerups, Difficulties, Coins, Skins</title>
-<meta charset="UTF-8">
+<title>Snake — Dungeon Adventure (Enhanced)</title>
+<meta charset="utf-8">
 <style>
-html, body {
-  height: 100%; margin: 0; background: black; color: white;
-  font-family: Arial, sans-serif; overflow: hidden;
-}
-#container {
-  display: flex; height: 100%; width: 100%;
-}
-#sidebar {
-  width: 260px; background: #111; border-right: 2px solid #444;
-  padding: 20px; overflow-y: auto;
-}
-#gameArea {
-  flex: 1; display: flex; flex-direction: column; align-items: center;
-  justify-content: center;
-}
-button {
-  padding: 10px 16px; background: #4a90e2; border: none; color: white;
-  border-radius: 6px; cursor: pointer; font-size: 15px; width: 100%;
-}
-button:hover { background: #357abd; }
-canvas {
-  border: 2px solid white;
-}
-.skin-button {
-  margin-top: 6px; padding: 8px; background: #222;
-  border: 1px solid #555;
-}
+html,body{height:100%;margin:0;background:#050505;color:#eee;font-family:Arial,Helvetica,sans-serif}
+#container{display:flex;height:100vh}
+#sidebar{width:300px;background:#101214;border-right:2px solid #222;padding:18px;overflow:auto}
+#gameArea{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center}
+canvas{border:2px solid #444;background:#000;display:block}
+h2,h3{margin:8px 0}
+.btn{display:block;width:100%;padding:10px;border-radius:6px;border:none;background:#2b6fd6;color:white;margin:6px 0;cursor:pointer}
+.small{padding:6px;font-size:13px}
+.row{display:flex;gap:8px}
+.skin-button{width:100%;padding:8px;margin:6px 0;border-radius:6px;border:1px solid #333;background:#121214;color:#ddd;cursor:pointer;text-align:left}
+.perk{display:flex;justify-content:space-between;align-items:center;padding:8px;border:1px solid #222;margin:6px 0;border-radius:6px}
+.info{font-size:13px;color:#bbb}
+.badge{background:#222;padding:4px 8px;border-radius:999px;font-weight:bold}
 </style>
 </head>
 <body>
 <div id="container">
-<div id="sidebar">
-  <h2>Snake Menu</h2>
-  <h3>Difficulty</h3>
-  <button onclick="setDifficulty('easy')">Easy</button>
-  <button onclick="setDifficulty('normal')">Normal</button>
-  <button onclick="setDifficulty('hard')">Hard</button>
-  <button onclick="setDifficulty('insane')">Insane</button>
+  <div id="sidebar">
+    <h2>Dungeon Snake</h2>
+    <div class="info">Mode: <span id="modeText">Dungeon (Rooms)</span></div>
+    <h3>Difficulty</h3>
+    <div class="row"><button class="btn small" onclick="setDifficulty('easy')">Easy</button><button class="btn small" onclick="setDifficulty('normal')">Normal</button></div>
+    <div class="row"><button class="btn small" onclick="setDifficulty('hard')">Hard</button><button class="btn small" onclick="setDifficulty('insane')">Insane</button></div>
+    <h3>Game Controls</h3>
+    <button class="btn" onclick="startLevel()">Start / Restart Level</button>
+    <button class="btn" onclick="togglePause()">Pause / Resume</button>
+    <h3>Stats</h3>
+    <div class="info">Score: <span id="score">0</span></div>
+    <div class="info">Coins: <span id="coins">0</span></div>
+    <div class="info">Gold Apples: <span id="goldCount">0</span></div>
+    <h3>Skins</h3>
+    <div id="shop"></div>
 
-  <h3 style="margin-top:20px;">Mode</h3>
-  <button onclick="toggleMode()" id="modeBtn">Competitive: OFF</button>
+    <h3>Mastery</h3>
+    <div class="info">Mastery Points: <span id="mp">0</span></div>
+    <div id="masteryList"></div>
 
-  <h3 style="margin-top:20px;">Coins: <span id="coins">0</span></h3>
+    <h3>Inventory</h3>
+    <div class="info">Keys: <span id="keys">0</span></div>
 
-  <h3>Skins</h3>
-  <div id="shop"></div>
-</div>
+    <h3>Options</h3>
+    <button class="btn" onclick="resetProgress()">Reset Progress</button>
+    <div class="info" style="margin-top:10px">Tips: Collect keys to open doors. Gold apples spawn rarely and give big rewards. Use mastery to specialize your run.</div>
+  </div>
 
-<div id="gameArea">
-  <div id="status" style="font-size:28px; height:40px; margin-bottom:10px;"></div>
-  <canvas id="game" width="400" height="400" tabindex="0"></canvas>
-</div>
+  <div id="gameArea">
+    <div style="height:40px;display:flex;align-items:center;gap:12px">
+      <div id="status" style="font-size:20px"></div>
+      <div id="levelName" style="font-size:18px;color:#aaa"></div>
+    </div>
+    <canvas id="game" width="400" height="400" tabindex="0"></canvas>
+    <div style="height:12px"></div>
+    <div class="info">Arrows to move • Press S for shop • Press M for mastery</div>
+  </div>
 </div>
 
 <script>
+// --- Persistent storage keys ---
+const LS_COINS = 'dungeon_snake_coins';
+const LS_SKIN = 'dungeon_snake_skin';
+const LS_UNLOCKED = 'dungeon_snake_unlocked';
+const LS_MASTERY = 'dungeon_snake_mastery';
+
+// --- Canvas and context ---
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
-const statusEl = document.getElementById('status');
-const coinsEl = document.getElementById('coins');
-const shopEl = document.getElementById('shop');
-const modeBtn = document.getElementById('modeBtn');
+const grid = 16;
+const cellsPerSide = 25; // 400/16 = 25
 
-let grid = 16;
-let count = 0;
-let competitive = false;
-let paused = false;
+// --- UI elements ---
+const scoreEl = document.getElementById('score');
+const coinsEl = document.getElementById('coins');
+const mpEl = document.getElementById('mp');
+const shopEl = document.getElementById('shop');
+const masteryListEl = document.getElementById('masteryList');
+const keysEl = document.getElementById('keys');
+const goldEl = document.getElementById('goldCount');
+const statusEl = document.getElementById('status');
+const levelNameEl = document.getElementById('levelName');
+
+// --- Game state ---
 let difficulty = 'normal';
 let speedFrames = 8;
-let coins = 0;
-let currentSkin = 'green';
+let frameCount = 0;
+let paused = true;
+let score = 0;
+let coins = loadInt(LS_COINS, 0);
+let goldCount = 0;
+let keys = 0;
+let currentSkin = localStorage.getItem(LS_SKIN) || 'green';
+let unlocked = JSON.parse(localStorage.getItem(LS_UNLOCKED) || JSON.stringify(['green']));
+let mastery = JSON.parse(localStorage.getItem(LS_MASTERY) || JSON.stringify({points:0,perks:{}}));
 
+// --- Skins with gradients ---
 const skins = {
-  green: { name: 'Green', color: 'lime', cost: 0 },
-  blue: { name: 'Blue', color: 'cyan', cost: 20 },
-  red: { name: 'Red', color: 'red', cost: 20 },
-  rainbow: { name: 'Rainbow', color: 'rainbow', cost: 50 },
-  neon: { name: 'Neon', color: '#39ff14', cost: 75 }
+  green: {name:'Verdant', cost:0, draw: (x,y)=>{ ctx.fillStyle='lime'; ctx.fillRect(x,y,grid-1,grid-1); }},
+  blue: {name:'Cerulean', cost:20, draw: (x,y)=>{ let g=ctx.createLinearGradient(x,y,x+grid,y+grid); g.addColorStop(0,'#00f'); g.addColorStop(1,'#0ff'); ctx.fillStyle=g; ctx.fillRect(x,y,grid-1,grid-1);} },
+  red: {name:'Crimson', cost:20, draw: (x,y)=>{ let g=ctx.createLinearGradient(x,y,x+grid,y); g.addColorStop(0,'#f00'); g.addColorStop(1,'#ff7f7f'); ctx.fillStyle=g; ctx.fillRect(x,y,grid-1,grid-1);} },
+  rainbow: {name:'Rainbow', cost:50, draw: (x,y,i)=>{ let hue=(i*30)%360; ctx.fillStyle = `hsl(${hue},90%,60%)`; ctx.fillRect(x,y,grid-1,grid-1);} },
+  neon: {name:'Neon Glow', cost:75, draw: (x,y)=>{ let g=ctx.createLinearGradient(x,y,x,y+grid); g.addColorStop(0,'#39ff14'); g.addColorStop(1,'#00ffd5'); ctx.fillStyle=g; ctx.fillRect(x,y,grid-1,grid-1);} }
 };
 
-function updateShop() {
-  shopEl.innerHTML = '';
-  for (let id in skins) {
-    const s = skins[id];
-    const btn = document.createElement('button');
-    btn.className = 'skin-button';
-    btn.textContent = `${s.name} (${s.cost})`;
-    btn.onclick = () => buySkin(id);
-    shopEl.appendChild(btn);
-  }
+// --- Mastery perks ---
+const masteryPerks = {
+  startBigger: {name:'Start Bigger', cost:2, desc:'Start every level with +4 length', apply: (s)=>{s.maxCells+=4;}},
+  doublePoints: {name:'Double Points', cost:3, desc:'Apples give 2x points for this run', apply:()=>{}},
+  extraCoins: {name:'Treasure Hunter', cost:2, desc:'Each apple gives +1 extra coin', apply:()=>{}},
+  shield: {name:'Shield', cost:4, desc:'One collision ignored per level', apply:()=>{}},
+  fastLearner: {name:'Fast Learner', cost:3, desc:'Gain more mastery points per gold apple', apply:()=>{}}
+};
+
+// --- Player and enemies ---
+let player = {x:160,y:160,dx:grid,dy:0,cells:[],maxCells:4,shielded:false};
+let enemies = [];
+
+// --- Dungeon layout ---
+const dungeon = {cols:3,rows:3,rooms:[]};
+let currentRoom = {col:1,row:1};
+let levelIndex = 1;
+
+// --- Items ---
+let apple = {x:0,y:0};
+let goldApple = null; // or {x,y,ttl}
+let powerups = [];
+
+// --- Audio via WebAudio ---
+const audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+function playBeep(freq, type='sine', duration=0.06, gain=0.12){
+  try{
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = type; o.frequency.value = freq; g.gain.value = gain;
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + duration);
+  }catch(e){}
 }
-updateShop();
+function playPickup(){ playBeep(880,'sine',0.05,0.08); }
+function playGold(){ playBeep(1320,'square',0.12,0.16); }
+function playHit(){ playBeep(120,'sawtooth',0.12,0.12); }
 
-function buySkin(id) {
-  const s = skins[id];
-  if (coins >= s.cost) {
-    coins -= s.cost;
-    coinsEl.textContent = coins;
-    currentSkin = id;
-  }
-}
+// --- Utilities ---
+function randRoom(){ return Math.floor(Math.random()*dungeon.cols); }
+function loadInt(k,d){return parseInt(localStorage.getItem(k))||d}
 
-const player = { x:160, y:160, dx:grid, dy:0, cells:[], maxCells:4 };
-const bot = { x:240, y:240, dx:0, dy:grid, cells:[], maxCells:4 };
-const apple = { x:320, y:320 };
-
-const powerups = [];
-const powerTypes = ['speed','slow','ghost','double','freeze'];
-let ghostTimer = 0;
-let speedTimer = 0;
-let slowTimer = 0;
-let doubleTimer = 0;
-let freezeTimer = 0;
-
-function spawnPowerup() {
-  if (Math.random() < 0.01) {
-    powerups.push({
-      type: powerTypes[Math.floor(Math.random()*powerTypes.length)],
-      x: Math.floor(Math.random()*25)*grid,
-      y: Math.floor(Math.random()*25)*grid
-    });
-  }
-}
-
-function applyPower(type) {
-  if (type === 'ghost') ghostTimer = 200;
-  if (type === 'speed') speedTimer = 150;
-  if (type === 'slow') slowTimer = 150;
-  if (type === 'double') doubleTimer = 200;
-  if (type === 'freeze') freezeTimer = 120;
-}
-
-function setDifficulty(d) {
-  difficulty = d;
-  if (d==='easy') speedFrames = 12;
-  if (d==='normal') speedFrames = 8;
-  if (d==='hard') speedFrames = 5;
-  if (d==='insane') speedFrames = 3;
-  resetGame();
-}
-
-function toggleMode() {
-  competitive = !competitive;
-  modeBtn.textContent = `Competitive: ${competitive? 'ON':'OFF'}`;
-  resetGame();
-}
-
-function resetGame() {
-  player.x=160; player.y=160; player.dx=grid; player.dy=0;
-  player.cells=[]; player.maxCells=4;
-
-  if (competitive) {
-    bot.x=240; bot.y=240; bot.dx=0; bot.dy=grid;
-    bot.cells=[]; bot.maxCells=4;
-  } else {
-    bot.cells=[];
-  }
-
-  ghostTimer=speedTimer=slowTimer=doubleTimer=freezeTimer=0;
-  powerups.length = 0;
-
-  apple.x = Math.floor(Math.random()*25)*grid;
-  apple.y = Math.floor(Math.random()*25)*grid;
-  paused=false; statusEl.textContent='';
-}
-
-function loop() {
-  requestAnimationFrame(loop);
-  if (paused) return;
-
-  let frameSkip = speedFrames;
-  if (speedTimer>0) frameSkip = 3;
-  if (slowTimer>0) frameSkip = 12;
-
-  if (++count < frameSkip) return;
-  count=0;
-
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-
-  if (speedTimer>0) speedTimer--;
-  if (slowTimer>0) slowTimer--;
-  if (ghostTimer>0) ghostTimer--;
-  if (doubleTimer>0) doubleTimer--;
-  if (freezeTimer>0) freezeTimer--;
-
-  player.x += player.dx;
-  player.y += player.dy;
-  wrap(player);
-  player.cells.unshift({x:player.x, y:player.y});
-  if (player.cells.length > player.maxCells) player.cells.pop();
-
-  ctx.fillStyle='red';
-  ctx.fillRect(apple.x, apple.y, grid-1, grid-1);
-
-  if (player.x===apple.x && player.y===apple.y) {
-    let gain = doubleTimer>0 ? 2 : 1;
-    player.maxCells += gain;
-    coins += gain;
-    coinsEl.textContent = coins;
-    apple.x = Math.floor(Math.random()*25)*grid;
-    apple.y = Math.floor(Math.random()*25)*grid;
-  }
-
-  if (currentSkin==='rainbow') {
-    player.cells.forEach((c,i)=>{
-      ctx.fillStyle = `hsl(${(i*20)%360},100%,50%)`;
-      ctx.fillRect(c.x,c.y,grid-1,grid-1);
-    });
-  } else {
-    ctx.fillStyle = skins[currentSkin].color;
-    player.cells.forEach(c=>ctx.fillRect(c.x,c.y,grid-1,grid-1));
-  }
-
-  let collision = !ghostTimer && selfCollision(player);
-
-  if (competitive) {
-    if (!freezeTimer) moveBot();
-    bot.cells.unshift({x:bot.x,y:bot.y});
-    if (bot.cells.length > bot.maxCells) bot.cells.pop();
-
-    if (bot.x===apple.x && bot.y===apple.y) {
-      bot.maxCells++;
-      apple.x = Math.floor(Math.random()*25)*grid;
-      apple.y = Math.floor(Math.random()*25)*grid;
+// --- Init dungeon rooms ---
+function genDungeon(){
+  dungeon.rooms = [];
+  for(let r=0;r<dungeon.rows;r++){
+    for(let c=0;c<dungeon.cols;c++){
+      const room = {col:c,row:r,walls:[],doors:[],keys:0,enemies:[],name:`Room ${r*3+c+1}`};
+      // Random walls (simple rectangles)
+      if(Math.random()<0.6){
+        for(let i=0;i<8;i++){
+          const wx=Math.floor(Math.random()*20)+2; const wy=Math.floor(Math.random()*20)+2; const ww=Math.floor(Math.random()*4)+1; const wh=Math.floor(Math.random()*4)+1;
+          room.walls.push({x:wx,y:wy,w:ww,h:wh});
+        }
+      }
+      // Doors at edges - some rooms have locked doors
+      if(c<dungeon.cols-1) room.doors.push({to:{col:c+1,row:r},x:cellsPerSide-1,y:Math.floor(cellsPerSide/2),locked:Math.random()<0.2});
+      if(r<dungeon.rows-1) room.doors.push({to:{col:c,row:r+1},x:Math.floor(cellsPerSide/2),y:cellsPerSide-1,locked:Math.random()<0.2});
+      // Place enemies
+      const enemyCount = Math.random()<0.6? Math.floor(Math.random()*3)+1:0;
+      for(let e=0;e<enemyCount;e++){
+        room.enemies.push({x:Math.floor(Math.random()*cellsPerSide)*grid,y:Math.floor(Math.random()*cellsPerSide)*grid,dx: (Math.random()<0.5?grid:-grid), dy:0});
+      }
+      dungeon.rooms.push(room);
     }
-
-    ctx.fillStyle='blue';
-    bot.cells.forEach(c=>ctx.fillRect(c.x,c.y,grid-1,grid-1));
-
-    if (selfCollision(bot)) collision=true;
-    if (touching(player,bot)) collision=true;
   }
-
-  spawnPowerup();
-  powerups.forEach((p,i)=>{
-    ctx.fillStyle = 'yellow';
-    ctx.fillRect(p.x,p.y,grid-1,grid-1);
-    if (player.x===p.x && player.y===p.y) {
-      applyPower(p.type);
-      powerups.splice(i,1);
-    }
-  });
-
-  if (collision) {
-    statusEl.textContent='Collision!';
-    paused=true;
-    setTimeout(resetGame,2000);
-  }
-
-  ctx.fillStyle='white';
-  ctx.font='bold 20px Arial';
-  ctx.fillText(`Score: ${player.maxCells-4}`,10,25);
-  if (competitive) ctx.fillText(`Bot: ${bot.maxCells-4}`,300,25);
 }
 
-function moveBot() {
-  let dirs=[
-    {dx:grid,dy:0},{dx:-grid,dy:0},{dx:0,dy:grid},{dx:0,dy:-grid}
-  ];
-  dirs.sort(()=>Math.random()-0.5);
-  let best=null; let bestDist=9999;
-  dirs.forEach(d=>{
-    let nx=bot.x+d.dx, ny=bot.y+d.dy;
-    wrapPos({x:nx,y:ny});
-    let dist = Math.abs(nx-apple.x)+Math.abs(ny-apple.y);
-    if (dist<bestDist) { bestDist=dist; best=d; }
-  });
-  if (best) { bot.dx=best.dx; bot.dy=best.dy; bot.x+=bot.dx; bot.y+=bot.dy; wrap(bot);}  
+// --- Room helpers ---
+function getRoom(col,row){ return dungeon.rooms[row*dungeon.cols + col]; }
+function enterRoom(col,row){ currentRoom={col,row}; levelNameEl.textContent = getRoom(col,row).name; spawnInRoom(getRoom(col,row)); }
+
+function spawnInRoom(room){
+  // Reset player position near center
+  player.x = Math.floor(cellsPerSide/2)*grid;
+  player.y = Math.floor(cellsPerSide/2)*grid;
+  player.dx = grid; player.dy = 0;
+  player.cells = [];
+  enemies = JSON.parse(JSON.stringify(room.enemies));
+
+  // Apply mastery start bigger
+  player.maxCells = 4;
+  if(mastery.perks.startBigger) player.maxCells += 4;
+
+  // place apple not on wall
+  placeApple(room);
+  // maybe gold apple
+  if(Math.random()<0.04) spawnGold(room);
 }
 
-function wrap(s){ if(s.x<0)s.x=384; if(s.x>384)s.x=0; if(s.y<0)s.y=384; if(s.y>384)s.y=0; }
-function wrapPos(s){ if(s.x<0)s.x=384; if(s.x>384)s.x=0; if(s.y<0)s.y=384; if(s.y>384)s.y=0; }
+function placeApple(room){
+  let tries=0;
+  while(tries<200){
+    const x = Math.floor(Math.random()*cellsPerSide)*grid;
+    const y = Math.floor(Math.random()*cellsPerSide)*grid;
+    if(!posBlocked(room,x,y)) { apple.x=x; apple.y=y; return; }
+    tries++;
+  }
+}
+function spawnGold(room){ goldApple = {x:Math.floor(Math.random()*cellsPerSide)*grid,y:Math.floor(Math.random()*cellsPerSide)*grid,ttl:900}; }
 
-function selfCollision(s){
-  for(let i=1;i<s.cells.length;i++) if(s.cells[0].x===s.cells[i].x && s.cells[0].y===s.cells[i].y) return true;
+function posBlocked(room,x,y){
+  // walls
+  for(const w of room.walls){
+    const rx = w.x*grid, ry = w.y*grid, rw=w.w*grid, rh=w.h*grid;
+    if(x>=rx && x<rx+rw && y>=ry && y<ry+rh) return true;
+  }
+  // doors are in open spaces -- ignore
   return false;
 }
 
-function touching(a,b){
-  for(let c1 of a.cells) for(let c2 of b.cells) if(c1.x===c2.x&&c1.y===c2.y) return true;
-  return false;
+// --- Set difficulty ---
+function setDifficulty(d){ difficulty=d; if(d==='easy') speedFrames=12; if(d==='normal') speedFrames=8; if(d==='hard') speedFrames=5; if(d==='insane') speedFrames=3; }
+
+// --- Shop and Mastery UI ---
+function updateShop(){ shopEl.innerHTML=''; for(let id in skins){ const s=skins[id]; const btn=document.createElement('div'); btn.className='skin-button'; btn.innerHTML=`<strong>${s.name}</strong> — ${s.cost} coins`; btn.onclick=()=>buySkin(id); if(unlocked.includes(id)) btn.innerHTML += ' <span class="badge">Owned</span>'; shopEl.appendChild(btn);} coinsEl.textContent = coins; }
+function buySkin(id){ const s=skins[id]; if(unlocked.includes(id)){ currentSkin=id; localStorage.setItem(LS_SKIN,id); updateShop(); return; } if(coins>=s.cost){ coins-=s.cost; unlocked.push(id); localStorage.setItem(LS_COINS,coins); localStorage.setItem(LS_UNLOCKED,JSON.stringify(unlocked)); currentSkin=id; localStorage.setItem(LS_SKIN,id); updateShop(); playPickup(); } else alert('Not enough coins'); }
+
+function updateMasteryUI(){ masteryListEl.innerHTML=''; mpEl.textContent = mastery.points; for(let id in masteryPerks){ const p=masteryPerks[id]; const div=document.createElement('div'); div.className='perk'; div.innerHTML = `<div><strong>${p.name}</strong><div class="info">${p.desc}</div></div><div><button onclick=buyPerk('${id}') class='btn small'>Buy (${p.cost})</button></div>`; masteryListEl.appendChild(div);} }
+function buyPerk(id){ const p=masteryPerks[id]; if(mastery.points >= p.cost){ mastery.points -= p.cost; mastery.perks[id]=true; localStorage.setItem(LS_MASTERY,JSON.stringify(mastery)); updateMasteryUI(); alert('Perk unlocked'); } else alert('Not enough mastery points'); }
+
+function resetProgress(){ if(confirm('Reset all progress?')){ localStorage.removeItem(LS_COINS); localStorage.removeItem(LS_UNLOCKED); localStorage.removeItem(LS_SKIN); localStorage.removeItem(LS_MASTERY); coins=0; unlocked=['green']; currentSkin='green'; mastery={points:0,perks:{}}; updateShop(); updateMasteryUI(); }}
+
+// --- Game control functions ---
+function startLevel(){ paused=false; frameCount=0; genDungeon(); enterRoom(1,1); score=0; updateUI(); }
+function togglePause(){ paused = !paused; }
+
+function updateUI(){ scoreEl.textContent = score; coinsEl.textContent = coins; keysEl.textContent = keys; goldEl.textContent = goldCount; mpEl.textContent = mastery.points; }
+
+// --- Game loop ---
+let loopCounter=0;
+function loop(){ requestAnimationFrame(loop); if(paused) return; if(++frameCount < speedFrames) return; frameCount=0; ctx.clearRect(0,0,canvas.width,canvas.height);
+  const room = getRoom(currentRoom.col,currentRoom.row);
+  // move player
+  player.x += player.dx; player.y += player.dy; wrap(player);
+  player.cells.unshift({x:player.x,y:player.y});
+  if(player.cells.length > player.maxCells) player.cells.pop();
+
+  // collision with walls
+  if(posBlocked(room,player.x,player.y) && !player.shielded){ // collision -> game over for level
+    if(mastery.perks.shield && !player.shieldedUsed){ player.shieldedUsed=true; player.shielded=true; playBeep(600,'sine',0.06,0.12); setTimeout(()=>player.shielded=false,500); }
+    else { playHit(); statusEl.textContent='You hit a wall!'; paused=true; setTimeout(()=>{ startLevel(); },1200); return; }
+  }
+
+  // enemies move
+  for(let en of enemies){ en.x += en.dx; en.y += en.dy; if(en.x<0||en.x> (cellsPerSide-1)*grid) en.dx *= -1; if(en.y<0||en.y> (cellsPerSide-1)*grid) en.dy *= -1; }
+
+  // enemy collision
+  for(const en of enemies){ if(en.x===player.x && en.y===player.y){ if(mastery.perks.shield && !player.shieldedUsed){ player.shieldedUsed=true; playBeep(700,'sine',0.06,0.12); } else { playHit(); statusEl.textContent='Killed by enemy'; paused=true; setTimeout(()=>{ startLevel(); },1200); return; } } }
+
+  // apple pickup
+  if(player.x===apple.x && player.y===apple.y){ let gain = (mastery.perks.doublePoints?2:1); if(mastery.perks.extraCoins) coins += gain+1; else coins += gain; score += gain; player.maxCells += gain; playPickup(); placeApple(room); // small chance spawn a key
+    if(Math.random()<0.12){ keys++; playBeep(720,'triangle',0.05,0.08); }
+  }
+
+  // gold apple
+  if(goldApple){ goldApple.ttl--; if(player.x===goldApple.x && player.y===goldApple.y){ goldCount++; playGold(); // reward: coins and mastery points
+      coins += 10; mastery.points += (mastery.perks.fastLearner?2:1); goldApple = null; localStorage.setItem(LS_COINS,coins); localStorage.setItem(LS_MASTERY,JSON.stringify(mastery)); }
+    else if(goldApple.ttl<=0) goldApple=null; }
+
+  // room doors crossing
+  if(player.x=== (cellsPerSide-1)*grid && player.dx>0){ // right edge
+    const d = room.doors.find(dd=>dd.x===cellsPerSide-1);
+    if(d){ if(d.locked){ if(keys>0){ keys--; d.locked=false; } else { // can't pass
+        player.x -= player.dx; player.cells[0].x = player.x; }
+      } else { enterRoom(d.to.col,d.to.row); }
+    } else { // wrap normally
+      player.x = 0; }
+  }
+  if(player.x===0 && player.dx<0){ // left edge
+    // try door to left
+    const leftDoor = room.doors.find(dd=>dd.x===0);
+    if(leftDoor){ if(leftDoor.locked){ if(keys>0){ keys--; leftDoor.locked=false;} else { player.x += grid; player.cells[0].x = player.x; } } else { enterRoom(leftDoor.to.col,leftDoor.to.row);} }
+    else player.x=(cellsPerSide-1)*grid;
+  }
+  if(player.y===0 && player.dy<0){ const upDoor = room.doors.find(dd=>dd.y===0); if(upDoor){ if(upDoor.locked){ if(keys>0){ keys--; upDoor.locked=false;} else { player.y += grid; player.cells[0].y = player.y; } } else { enterRoom(upDoor.to.col,upDoor.to.row);} } else player.y=(cellsPerSide-1)*grid; }
+  if(player.y=== (cellsPerSide-1)*grid && player.dy>0){ const downDoor = room.doors.find(dd=>dd.y===cellsPerSide-1); if(downDoor){ if(downDoor.locked){ if(keys>0){ keys--; downDoor.locked=false;} else { player.y -= grid; player.cells[0].y = player.y; } } else { enterRoom(downDoor.to.col,downDoor.to.row);} } else player.y=0; }
+
+  // draw walls
+  ctx.fillStyle='#333';
+  for(const w of room.walls){ ctx.fillRect(w.x*grid,w.y*grid,w.w*grid -1, w.h*grid -1); }
+
+  // draw apple
+  ctx.fillStyle='red'; ctx.fillRect(apple.x,apple.y,grid-1,grid-1);
+
+  // draw gold apple
+  if(goldApple){ ctx.strokeStyle='gold'; ctx.lineWidth=2; ctx.strokeRect(goldApple.x+1,goldApple.y+1,grid-3,grid-3); ctx.fillStyle='yellow'; ctx.fillRect(goldApple.x+2,goldApple.y+2,grid-5,grid-5); }
+
+  // draw enemies
+  ctx.fillStyle='magenta';
+  for(const en of enemies){ ctx.fillRect(en.x,en.y,grid-1,grid-1); }
+
+  // draw player with skin
+  if(currentSkin==='rainbow'){
+    player.cells.forEach((c,i)=>{ skins.rainbow.draw(c.x,c.y,i); });
+  } else {
+    player.cells.forEach(c=> skins[currentSkin].draw(c.x,c.y));
+  }
+
+  // UI
+  updateUI();
 }
 
-document.addEventListener('keydown',e=>{
-  if(e.key==='ArrowLeft'&&player.dx===0){player.dx=-grid;player.dy=0;}
-  if(e.key==='ArrowRight'&&player.dx===0){player.dx=grid;player.dy=0;}
-  if(e.key==='ArrowUp'&&player.dy===0){player.dy=-grid;player.dx=0;}
-  if(e.key==='ArrowDown'&&player.dy===0){player.dy=grid;player.dx=0;}
+// --- Input ---
+document.addEventListener('keydown',(e)=>{
+  if(e.key==='ArrowLeft' && player.dx===0){ player.dx = -grid; player.dy=0; }
+  if(e.key==='ArrowRight' && player.dx===0){ player.dx = grid; player.dy=0; }
+  if(e.key==='ArrowUp' && player.dy===0){ player.dy = -grid; player.dx=0; }
+  if(e.key==='ArrowDown' && player.dy===0){ player.dy = grid; player.dx=0; }
+  if(e.key.toLowerCase()==='s'){ // quick shop toggle: focus shop
+    alert('Shop: choose skins on the left.');
+  }
+  if(e.key.toLowerCase()==='m'){ alert('Mastery panel on the left — spend points between runs.'); }
 });
 
-resetGame();
-requestAnimationFrame(loop);
+// --- Helpers ---
+function wrap(s){ if(s.x<0) s.x = (cellsPerSide-1)*grid; if(s.x> (cellsPerSide-1)*grid) s.x=0; if(s.y<0) s.y=(cellsPerSide-1)*grid; if(s.y> (cellsPerSide-1)*grid) s.y=0; }
+
+// --- Persistence ---
+function persistProgress(){ localStorage.setItem(LS_COINS, coins); localStorage.setItem(LS_UNLOCKED, JSON.stringify(unlocked)); localStorage.setItem(LS_SKIN, currentSkin); localStorage.setItem(LS_MASTERY, JSON.stringify(mastery)); }
+
+// --- Load initial ---
+updateShop(); updateMasteryUI(); enterRoom(1,1); persistProgress(); requestAnimationFrame(loop);
+
+// Save periodically
+setInterval(()=>{ persistProgress(); },2000);
+
+// --- Start button default behavior ---
+startLevel();
 </script>
 </body>
 </html>
